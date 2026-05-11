@@ -1,0 +1,10 @@
+# PLACEHOLDER: DreamBench SVDiff config
+# Status: NOT IMPLEMENTED — SVDiff not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: imagen
+task: dreambench
+adapter:
+  name: svdiff

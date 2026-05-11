@@ -54,3 +54,10 @@ Thumbs.db
 
 .env
 .env.*
+!.env.example
+*.key
+secrets/
+wandb_api_key.txt
+hf_token.txt
+rclone.conf
+logs/

@@ -1,0 +1,10 @@
+# PLACEHOLDER: DreamBench DreamBooth (full fine-tune, no LoRA) config
+# Status: NOT IMPLEMENTED — Full DreamBooth without LoRA is not integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: imagen
+task: dreambench
+adapter:
+  name: dreambooth

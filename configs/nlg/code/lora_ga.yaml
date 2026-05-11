@@ -1,0 +1,9 @@
+# PLACEHOLDER: NLG Code Generation LoRA-GA config — NOT IMPLEMENTED
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: code
+adapter:
+  name: lora_ga

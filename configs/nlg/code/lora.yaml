@@ -1,0 +1,10 @@
+# PLACEHOLDER: NLG Code Generation LoRA baseline config
+# Status: NOT IMPLEMENTED
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: code
+adapter:
+  name: lora

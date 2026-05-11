@@ -1,0 +1,36 @@
+# PLACEHOLDER: NLG Conversation LoRA baseline config
+# Status: NOT IMPLEMENTED
+# See configs/nlg/metamath/lora.yaml for a complete working example.
+
+project:
+  name: fbd-lora
+  run_group: nlg-conversation-baseline
+  status: placeholder
+  implemented: false
+
+modality: nlg
+task: conversation
+
+model:
+  backbone: PLACEHOLDER_MODEL
+
+dataset:
+  name: PLACEHOLDER_CONVERSATION_DATASET
+  hf_path: PLACEHOLDER_DATASET_PATH
+  subset: null
+  split: train
+
+adapter:
+  name: lora
+  rank: 16
+  alpha: 16
+  dropout: 0.05
+  target_modules: []
+
+fbd:
+  enabled: false
+  routing_type: none
+
+wandb:
+  enabled: true
+  project: fbd-lora

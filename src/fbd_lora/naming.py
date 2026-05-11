@@ -145,3 +145,69 @@ def make_run_name(
         name = name[:180]
 
     return name
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point: python -m fbd_lora.naming --config <path> --print-run-name
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description="Print the run name for a given config.",
+        prog="python -m fbd_lora.naming",
+    )
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
+    parser.add_argument("--print-run-name", action="store_true", help="Print run name and exit.")
+    args = parser.parse_args()
+
+    if not args.print_run_name:
+        parser.print_help()
+        sys.exit(1)
+
+    try:
+        from omegaconf import OmegaConf
+    except ImportError:
+        print("[ERROR] omegaconf is required.")
+        sys.exit(1)
+
+    try:
+        cfg_obj = OmegaConf.load(args.config)
+        cfg = OmegaConf.to_container(cfg_obj, resolve=False)
+    except Exception as e:
+        print(f"[ERROR] Could not load config '{args.config}': {e}")
+        sys.exit(1)
+
+    def _get(d, *keys):
+        cur = d
+        for k in keys:
+            if not isinstance(cur, dict) or k not in cur:
+                return None
+            cur = cur[k]
+        return cur
+
+    seed = int(_get(cfg, "run", "seed") or 42)
+    modality = cfg.get("modality", "nlg")
+    task = cfg.get("task", "unknown")
+    backbone = _get(cfg, "model", "backbone") or "unknown"
+    adapter = _get(cfg, "adapter", "name") or "lora"
+    rank = int(_get(cfg, "adapter", "rank") or 16)
+    alpha = int(_get(cfg, "adapter", "alpha") or 16)
+    bs = int(_get(cfg, "training", "per_device_train_batch_size")
+             or _get(cfg, "training", "train_batch_size") or 4)
+    ga = int(_get(cfg, "training", "gradient_accumulation_steps") or 1)
+    lr = float(_get(cfg, "training", "learning_rate") or 2e-4)
+    target_mods = list(_get(cfg, "adapter", "target_modules") or [])
+    routing = _get(cfg, "fbd", "routing_type") or "none"
+    lambda_r = float(_get(cfg, "fbd", "lambda_route") or 0.0)
+
+    run_name = make_run_name(
+        seed=seed, modality=modality, task=task, backbone=backbone,
+        adapter=adapter, rank=rank, alpha=alpha,
+        batch_size=bs, grad_accum=ga, lr=lr,
+        target_modules=target_mods, routing=routing, lambda_route=lambda_r,
+        full_config=cfg,
+    )
+    print(run_name)

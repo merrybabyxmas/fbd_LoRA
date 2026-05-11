@@ -1,0 +1,10 @@
+# PLACEHOLDER: NLG Conversation DoRA config
+# Status: NOT IMPLEMENTED — DoRA not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: conversation
+adapter:
+  name: dora

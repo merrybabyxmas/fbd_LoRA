@@ -1,0 +1,10 @@
+# PLACEHOLDER: NLG Conversation PiSSA config
+# Status: NOT IMPLEMENTED — PiSSA not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: conversation
+adapter:
+  name: pissa

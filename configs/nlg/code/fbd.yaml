@@ -1,0 +1,11 @@
+# PLACEHOLDER: NLG Code Generation FBD-LoRA config
+# Status: NOT IMPLEMENTED
+# Code generation task not yet configured. Typical choice: HumanEval / MBPP.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: code
+adapter:
+  name: fbd

@@ -1,0 +1,10 @@
+# PLACEHOLDER: DreamBench Custom Diffusion config
+# Status: NOT IMPLEMENTED — Custom Diffusion not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: imagen
+task: dreambench
+adapter:
+  name: custom_diffusion

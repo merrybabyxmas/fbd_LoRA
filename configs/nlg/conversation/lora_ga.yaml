@@ -1,0 +1,10 @@
+# PLACEHOLDER: NLG Conversation LoRA-GA config
+# Status: NOT IMPLEMENTED — LoRA-GA not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: conversation
+adapter:
+  name: lora_ga

@@ -1,0 +1,45 @@
+# PLACEHOLDER: NLG Conversation FBD-LoRA config
+# Status: NOT IMPLEMENTED
+# This config is reserved for a future conversation-task experiment.
+# To use, fill in the actual dataset path, model backbone, and adapter settings.
+#
+# ERROR: This config will cause train.py to fail at dataset loading
+# because no conversation dataset or prompt template has been configured.
+#
+# See configs/nlg/metamath/fbd.yaml for a complete working example.
+
+project:
+  name: fbd-lora
+  run_group: nlg-conversation-main
+  status: placeholder
+  implemented: false
+
+modality: nlg
+task: conversation
+
+model:
+  backbone: PLACEHOLDER_MODEL  # e.g. mistralai/Mistral-7B-v0.1
+
+dataset:
+  name: PLACEHOLDER_CONVERSATION_DATASET
+  hf_path: PLACEHOLDER_DATASET_PATH
+  subset: null
+  split: train
+  max_samples: null
+  prompt_template: PLACEHOLDER_TEMPLATE
+  max_seq_length: 2048
+
+adapter:
+  name: fbd
+  rank: 16
+  alpha: 16
+  dropout: 0.05
+  target_modules: []
+
+fbd:
+  enabled: true
+  routing_type: pullback_metric_mixed
+
+wandb:
+  enabled: true
+  project: fbd-lora

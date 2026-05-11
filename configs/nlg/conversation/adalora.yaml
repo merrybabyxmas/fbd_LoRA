@@ -1,0 +1,10 @@
+# PLACEHOLDER: NLG Conversation AdaLoRA config
+# Status: NOT IMPLEMENTED — AdaLoRA not yet integrated.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: conversation
+adapter:
+  name: adalora

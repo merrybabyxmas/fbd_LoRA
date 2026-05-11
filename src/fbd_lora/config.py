@@ -1,4 +1,10 @@
-"""FBD-LoRA configuration dataclass."""
+"""FBD-LoRA configuration dataclass and CLI validator.
+
+CLI usage:
+    python -m fbd_lora.config --validate --config <path> --mode train
+    python -m fbd_lora.config --validate --config <path> --mode eval
+    python -m fbd_lora.config --print-run-name --config <path>
+"""
 
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Sequence
@@ -48,3 +54,173 @@ class FBDConfig:
         valid_keys = cls.__dataclass_fields__.keys()
         filtered = {k: v for k, v in d.items() if k in valid_keys}
         return cls(**filtered)
+
+
+# ---------------------------------------------------------------------------
+# Config validation helpers
+# ---------------------------------------------------------------------------
+
+_COMMON_REQUIRED = [
+    "modality",
+    "task",
+]
+
+_TRAIN_REQUIRED_PATHS = [
+    ("model", "backbone"),
+    ("adapter", "name"),
+    ("adapter", "rank"),
+    ("adapter", "alpha"),
+    ("adapter", "dropout"),
+    ("training",),  # block must exist
+]
+
+_EVAL_REQUIRED_PATHS = [
+    ("evaluation",),
+]
+
+
+def _get_nested(cfg: dict, *keys: str):
+    """Traverse nested dict; return value or None if missing."""
+    cur = cfg
+    for k in keys:
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+    return cur
+
+
+def validate_config(cfg: dict, mode: str = "train") -> list:
+    """Validate config dict against required fields.
+
+    Returns a list of error strings (empty = valid).
+    """
+    errors = []
+
+    # Skip placeholder configs — they self-report as unimplemented
+    if _get_nested(cfg, "project", "implemented") is False:
+        errors.append("Config is marked as placeholder (project.implemented: false).")
+        return errors
+
+    # Common fields
+    for key in _COMMON_REQUIRED:
+        if key not in cfg or cfg[key] in (None, ""):
+            errors.append(f"Missing required top-level field: '{key}'")
+
+    if mode == "train":
+        # model
+        backbone = _get_nested(cfg, "model", "backbone")
+        if backbone is None or str(backbone).startswith("PLACEHOLDER"):
+            errors.append("Missing or placeholder: model.backbone")
+
+        # adapter
+        for key in ("name", "rank", "alpha", "dropout"):
+            val = _get_nested(cfg, "adapter", key)
+            if val is None:
+                errors.append(f"Missing required field: adapter.{key}")
+
+        # training block must exist
+        if "training" not in cfg or not isinstance(cfg.get("training"), dict):
+            errors.append("Missing required block: 'training'")
+        else:
+            train = cfg["training"]
+            for key in ("learning_rate", "per_device_train_batch_size", "gradient_accumulation_steps"):
+                if key not in train and "train_batch_size" not in train:
+                    # imagen uses train_batch_size instead of per_device_train_batch_size
+                    if key == "per_device_train_batch_size":
+                        continue
+                    errors.append(f"Missing required field: training.{key}")
+
+        # Check num_train_epochs or max_steps or max_train_steps
+        train = cfg.get("training", {})
+        has_epoch = "num_train_epochs" in train
+        has_steps = "max_steps" in train or "max_train_steps" in train
+        if not has_epoch and not has_steps:
+            errors.append("Missing required field: training.num_train_epochs or training.max_steps")
+
+    if mode == "eval":
+        if "evaluation" not in cfg:
+            errors.append("Missing required block: 'evaluation'")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+def _cli_main() -> None:
+    import argparse
+    import sys
+    try:
+        from omegaconf import OmegaConf
+    except ImportError:
+        print("[ERROR] omegaconf is required for config validation.")
+        sys.exit(1)
+
+    parser = argparse.ArgumentParser(
+        description="FBD-LoRA config validator and run name printer.",
+        prog="python -m fbd_lora.config",
+    )
+    parser.add_argument("--validate", action="store_true", help="Validate a config file.")
+    parser.add_argument("--print-run-name", action="store_true",
+                        help="Print the run name for a config and exit.")
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    parser.add_argument("--mode", type=str, default="train",
+                        choices=["train", "eval"], help="Validation mode.")
+    args = parser.parse_args()
+
+    if args.config is None:
+        parser.print_help()
+        sys.exit(1)
+
+    try:
+        cfg_obj = OmegaConf.load(args.config)
+        cfg = OmegaConf.to_container(cfg_obj, resolve=False)
+    except Exception as e:
+        print(f"[ERROR] Could not load config '{args.config}': {e}")
+        sys.exit(1)
+
+    if args.validate:
+        errors = validate_config(cfg, mode=args.mode)
+        if errors:
+            print(f"[ERROR] Config validation FAILED for: {args.config}")
+            for err in errors:
+                print(f"  - {err}")
+            sys.exit(1)
+        else:
+            print(f"[OK] Config validation passed: {args.config} (mode={args.mode})")
+            sys.exit(0)
+
+    if args.print_run_name:
+        from fbd_lora.naming import make_run_name
+        seed = int(_get_nested(cfg, "run", "seed") or 42)
+        modality = cfg.get("modality", "nlg")
+        task = cfg.get("task", "unknown")
+        backbone = _get_nested(cfg, "model", "backbone") or "unknown"
+        adapter = _get_nested(cfg, "adapter", "name") or "lora"
+        rank = int(_get_nested(cfg, "adapter", "rank") or 16)
+        alpha = int(_get_nested(cfg, "adapter", "alpha") or 16)
+        bs = int(_get_nested(cfg, "training", "per_device_train_batch_size")
+                 or _get_nested(cfg, "training", "train_batch_size") or 4)
+        ga = int(_get_nested(cfg, "training", "gradient_accumulation_steps") or 1)
+        lr = float(_get_nested(cfg, "training", "learning_rate") or 2e-4)
+        target_mods = list(_get_nested(cfg, "adapter", "target_modules") or [])
+        routing = _get_nested(cfg, "fbd", "routing_type") or "none"
+        lambda_r = float(_get_nested(cfg, "fbd", "lambda_route") or 0.0)
+
+        run_name = make_run_name(
+            seed=seed, modality=modality, task=task, backbone=backbone,
+            adapter=adapter, rank=rank, alpha=alpha,
+            batch_size=bs, grad_accum=ga, lr=lr,
+            target_modules=target_mods, routing=routing, lambda_route=lambda_r,
+            full_config=cfg,
+        )
+        print(run_name)
+        sys.exit(0)
+
+    parser.print_help()
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    _cli_main()

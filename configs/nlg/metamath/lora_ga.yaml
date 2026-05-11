@@ -1,0 +1,10 @@
+# PLACEHOLDER: MetaMath LoRA-GA config
+# Status: NOT IMPLEMENTED — LoRA-GA adapter not yet integrated in training code.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: metamath
+adapter:
+  name: lora_ga

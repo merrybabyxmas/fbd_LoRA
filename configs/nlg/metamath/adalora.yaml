@@ -1,0 +1,10 @@
+# PLACEHOLDER: MetaMath AdaLoRA config
+# Status: NOT IMPLEMENTED — AdaLoRA adapter not yet integrated in training code.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: metamath
+adapter:
+  name: adalora

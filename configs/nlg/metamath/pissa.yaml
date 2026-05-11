@@ -1,0 +1,10 @@
+# PLACEHOLDER: MetaMath PiSSA config
+# Status: NOT IMPLEMENTED — PiSSA adapter not yet integrated in training code.
+project:
+  name: fbd-lora
+  status: placeholder
+  implemented: false
+modality: nlg
+task: metamath
+adapter:
+  name: pissa
