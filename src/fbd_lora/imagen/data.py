@@ -2,12 +2,15 @@
 
 ConceptDataset: loads all images from a directory, tokenizes the instance prompt.
 download_customconcept101_concept: downloads one concept from the HuggingFace dataset.
+load_dreambench_plus: official-file loader for yuangpeng/dreambench_plus via snapshot_download.
 """
 
+import csv
+import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 import torchvision.transforms as T
@@ -17,6 +20,834 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".gif"}
+
+# Extensions recognized as concept images (spec subset, case-insensitive)
+_DREAMBENCH_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+# Directories to exclude when scanning
+_EXCLUDE_DIRS = {"outputs", "results", "samples", "generated", "__pycache__", ".git"}
+
+# Flexible key recognition
+_IMAGE_KEYS = {
+    "image", "image_path", "image_file", "img", "img_path",
+    "path", "file", "filename", "reference_image", "ref_image",
+    "source_image",
+}
+_PROMPT_KEYS = {
+    "prompt", "prompts", "text", "caption", "captions",
+    "eval_prompt", "evaluation_prompt", "target_prompt",
+}
+_CONCEPT_KEYS = {
+    "concept", "concept_id", "subject", "subject_id", "id", "name", "category",
+}
+
+
+# ---------------------------------------------------------------------------
+# Directory tree printer (for error diagnostics)
+# ---------------------------------------------------------------------------
+
+def print_directory_tree(root: str, max_depth: int = 3, max_files: int = 200) -> str:
+    """Return a human-readable directory tree string for diagnostics.
+
+    Args:
+        root: Root directory path.
+        max_depth: Maximum recursion depth (default 3).
+        max_files: Maximum total files to print before truncating (default 200).
+
+    Returns:
+        Multi-line string representation of the tree.
+    """
+    root_path = Path(root)
+    if not root_path.exists():
+        return f"[directory does not exist: {root}]"
+
+    lines: List[str] = [str(root_path)]
+    file_count = [0]
+
+    def _recurse(path: Path, depth: int, prefix: str) -> None:
+        if depth > max_depth or file_count[0] >= max_files:
+            return
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
+        except PermissionError:
+            lines.append(f"{prefix}[permission denied]")
+            return
+
+        for i, entry in enumerate(entries):
+            is_last = (i == len(entries) - 1)
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{entry.name}")
+            file_count[0] += 1
+            if file_count[0] >= max_files:
+                lines.append(f"{prefix}    ... (truncated at {max_files} entries)")
+                return
+            if entry.is_dir() and entry.name not in _EXCLUDE_DIRS:
+                child_prefix = prefix + ("    " if is_last else "│   ")
+                _recurse(entry, depth + 1, child_prefix)
+
+    _recurse(root_path, 1, "")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# DreamBench++ official-file loader
+# ---------------------------------------------------------------------------
+
+def resolve_dreambench_plus_root(data_cfg) -> Optional[str]:
+    """Resolve the local data root from data config, expanding env vars and ~.
+
+    Args:
+        data_cfg: OmegaConf node or dict with a ``local_data_root`` field.
+
+    Returns:
+        Expanded path string if set and non-empty, else None.
+    """
+    # Support both OmegaConf node and plain dict
+    if hasattr(data_cfg, "get"):
+        raw = data_cfg.get("local_data_root", "") or ""
+    else:
+        try:
+            from omegaconf import OmegaConf
+            raw = OmegaConf.select(data_cfg, "local_data_root", default="") or ""
+        except Exception:
+            raw = getattr(data_cfg, "local_data_root", "") or ""
+
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    # Expand ${VAR} style
+    raw = os.path.expandvars(raw)
+    # Expand ~
+    raw = os.path.expanduser(raw)
+    # If after expansion still has unresolved ${...}, treat as not set
+    if raw.startswith("${") or not raw:
+        return None
+    return raw
+
+
+def _find_metadata_file(root: Path) -> Optional[Path]:
+    """Search for a metadata file in root directory.
+
+    Priority: metadata.json > metadata.jsonl > prompts.json > prompts.jsonl >
+              captions.json > *.json (first) > metadata.csv > prompts.csv > *.csv (first) >
+              metadata.tsv > *.tsv (first)
+    """
+    candidates = [
+        "metadata.json", "metadata.jsonl", "prompts.json", "prompts.jsonl",
+        "captions.json", "labels.json", "annotations.json",
+        "metadata.csv", "prompts.csv", "captions.csv",
+        "metadata.tsv", "prompts.tsv",
+    ]
+    for name in candidates:
+        p = root / name
+        if p.exists():
+            return p
+    # Try any JSON file
+    for p in sorted(root.glob("*.json")):
+        return p
+    # Try any JSONL file
+    for p in sorted(root.glob("*.jsonl")):
+        return p
+    # Try any CSV
+    for p in sorted(root.glob("*.csv")):
+        return p
+    # Try any TSV
+    for p in sorted(root.glob("*.tsv")):
+        return p
+    return None
+
+
+def _extract_value(record: dict, keys: set) -> Optional[Any]:
+    """Extract the first value matching any key from keys set (case-insensitive)."""
+    for k, v in record.items():
+        if k.lower() in keys:
+            return v
+    return None
+
+
+def _parse_prompts(raw) -> List[str]:
+    """Normalize prompt field to list of non-empty strings."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = raw.strip()
+        return [raw] if raw else []
+    if isinstance(raw, list):
+        result = []
+        for item in raw:
+            if isinstance(item, str):
+                s = item.strip()
+                if s:
+                    result.append(s)
+        return result
+    return []
+
+
+def _parse_metadata_file(meta_path: Path, concept_dir: Path) -> Dict[str, Any]:
+    """Parse a metadata file and return mapping of image_path -> list[prompt].
+
+    Returns:
+        Dict mapping relative-or-absolute image path str → list of prompt strings.
+        Also returns raw parsed records under key ``_raw_records`` for dict-format datasets.
+    """
+    suffix = meta_path.suffix.lower()
+    result: Dict[str, List[str]] = {}
+
+    try:
+        if suffix in (".json",):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, list):
+                # JSON list format: [{"concept_id":..., "image":..., "prompts":[...]}, ...]
+                for rec in data:
+                    if not isinstance(rec, dict):
+                        continue
+                    img_val = _extract_value(rec, _IMAGE_KEYS)
+                    prompt_val = _extract_value(rec, _PROMPT_KEYS)
+                    prompts = _parse_prompts(prompt_val)
+                    if img_val:
+                        result[str(img_val)] = prompts
+                    else:
+                        # Might be a concept-level record without image key
+                        concept_val = _extract_value(rec, _CONCEPT_KEYS)
+                        if concept_val is not None:
+                            result[f"__concept__{concept_val}"] = prompts
+
+            elif isinstance(data, dict):
+                if "items" in data and isinstance(data["items"], list):
+                    # JSON dict with items key
+                    for rec in data["items"]:
+                        if not isinstance(rec, dict):
+                            continue
+                        img_val = _extract_value(rec, _IMAGE_KEYS)
+                        prompt_val = _extract_value(rec, _PROMPT_KEYS)
+                        prompts = _parse_prompts(prompt_val)
+                        if img_val:
+                            result[str(img_val)] = prompts
+                else:
+                    # JSON mapping: {"concept_001": {"image":..., "prompts":[...]}}
+                    for key, val in data.items():
+                        if isinstance(val, dict):
+                            img_val = _extract_value(val, _IMAGE_KEYS)
+                            prompt_val = _extract_value(val, _PROMPT_KEYS)
+                            prompts = _parse_prompts(prompt_val)
+                            if img_val:
+                                result[str(img_val)] = prompts
+                            else:
+                                result[f"__concept__{key}"] = prompts
+                        elif isinstance(val, list):
+                            # value is a list of prompts for key=image_path
+                            prompts = _parse_prompts(val)
+                            result[str(key)] = prompts
+                        elif isinstance(val, str):
+                            result[str(key)] = [val.strip()] if val.strip() else []
+
+        elif suffix in (".jsonl",):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    img_val = _extract_value(rec, _IMAGE_KEYS)
+                    prompt_val = _extract_value(rec, _PROMPT_KEYS)
+                    prompts = _parse_prompts(prompt_val)
+                    if img_val:
+                        result[str(img_val)] = prompts
+
+        elif suffix in (".csv", ".tsv"):
+            delimiter = "\t" if suffix == ".tsv" else ","
+            with open(meta_path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f, delimiter=delimiter)
+                for rec in reader:
+                    lower_rec = {k.lower().strip(): v for k, v in rec.items()}
+                    img_val = None
+                    for key in _IMAGE_KEYS:
+                        if key in lower_rec:
+                            img_val = lower_rec[key]
+                            break
+                    prompt_val = None
+                    for key in _PROMPT_KEYS:
+                        if key in lower_rec:
+                            prompt_val = lower_rec[key]
+                            break
+                    prompts = _parse_prompts(prompt_val)
+                    if img_val:
+                        result[str(img_val)] = prompts
+
+    except Exception as e:
+        logger.warning("Failed to parse metadata file %s: %s", meta_path, e)
+
+    return result
+
+
+def _collect_images_in_dir(concept_dir: Path, max_images: Optional[int] = None) -> List[Path]:
+    """Collect image files from concept directory, excluding excluded subdirs."""
+    images = []
+    for p in sorted(concept_dir.iterdir()):
+        if p.is_file() and p.suffix.lower() in _DREAMBENCH_IMAGE_EXTENSIONS:
+            images.append(p)
+        if max_images is not None and len(images) >= max_images:
+            break
+    return images
+
+
+def _resolve_image_path(img_key: str, concept_dir: Path) -> Optional[Path]:
+    """Try to resolve an image key (possibly relative) to an existing path."""
+    # Try as-is
+    p = Path(img_key)
+    if p.is_absolute() and p.exists():
+        return p
+    # Relative to concept_dir
+    candidate = concept_dir / img_key
+    if candidate.exists():
+        return candidate
+    # Just the filename part
+    candidate2 = concept_dir / Path(img_key).name
+    if candidate2.exists():
+        return candidate2
+    return None
+
+
+def _build_concept_from_dir(
+    concept_dir: Path,
+    concept_id: str,
+    category: Optional[str],
+    metadata: Dict[str, List[str]],
+    max_train_images: Optional[int],
+    max_eval_prompts: Optional[int],
+    allow_sanity_prompt_fallback: bool,
+) -> Optional[dict]:
+    """Build a concept dict from a directory with optional metadata mapping.
+
+    Args:
+        concept_dir: Path to directory containing concept images.
+        concept_id: String identifier for this concept.
+        category: Category label or None.
+        metadata: dict of image_path_str -> list[prompt], parsed from metadata file.
+        max_train_images: Limit on train images.
+        max_eval_prompts: Limit on eval prompts.
+        allow_sanity_prompt_fallback: If True, use fallback prompts when none found.
+
+    Returns:
+        Concept dict or None if the directory has no images.
+    """
+    # Collect images
+    all_images = _collect_images_in_dir(concept_dir, max_images=None)
+    if not all_images:
+        return None
+
+    # Gather all prompts from metadata
+    all_prompts: List[str] = []
+
+    # Try to match images to metadata keys
+    matched_prompts: Dict[str, List[str]] = {}
+    for img_path in all_images:
+        # Try different lookups
+        for key in [img_path.name, str(img_path), img_path.stem]:
+            if key in metadata:
+                matched_prompts[str(img_path)] = metadata[key]
+                break
+
+    # Collect prompts from matched records
+    for prompts in matched_prompts.values():
+        for p in prompts:
+            if p not in all_prompts:
+                all_prompts.append(p)
+
+    # If no image-level match, look for concept-level prompts
+    if not all_prompts:
+        for key, prompts in metadata.items():
+            if key.startswith("__concept__") or not any(
+                (concept_dir / key).exists() or (concept_dir / Path(key).name).exists()
+                for _ in [1]  # just trigger the loop
+            ):
+                for p in prompts:
+                    if p and p not in all_prompts:
+                        all_prompts.append(p)
+
+    # Fallback: look for .txt prompt files in directory
+    if not all_prompts:
+        for txt_name in ["eval_prompts.txt", "prompts.txt", "prompt.txt"]:
+            txt_path = concept_dir / txt_name
+            if txt_path.exists():
+                lines = txt_path.read_text(encoding="utf-8").strip().splitlines()
+                for line in lines:
+                    line = line.strip()
+                    if line:
+                        all_prompts.append(line)
+                if all_prompts:
+                    break
+
+    if not all_prompts:
+        if allow_sanity_prompt_fallback:
+            fallback = f"a photo of {concept_id.replace('_', ' ')}"
+            all_prompts = [fallback]
+            logger.warning(
+                "[WARNING] DreamBench++ prompt metadata not found. "
+                "Using sanity-only fallback prompts."
+            )
+            used_fallback = True
+        else:
+            return None  # Will be caught by caller
+        used_fallback = True
+    else:
+        used_fallback = False
+
+    # Apply limits
+    train_images = all_images[:max_train_images] if max_train_images else all_images
+    eval_prompts = all_prompts[:max_eval_prompts] if max_eval_prompts else all_prompts
+
+    return {
+        "concept_id": concept_id,
+        "category": category,
+        "train_images": [str(p) for p in train_images],
+        "eval_prompts": eval_prompts,
+        "reference_images": [str(p) for p in all_images],
+        "metadata": {
+            "num_train_images_original": len(all_images),
+            "num_eval_prompts_original": len(all_prompts),
+            "used_sanity_prompt_fallback": used_fallback,
+            "concept_dir": str(concept_dir),
+        },
+    }
+
+
+def load_dreambench_plus(data_cfg) -> List[dict]:
+    """Load DreamBench++ dataset from local files or HuggingFace snapshot.
+
+    Loading priority:
+    1. If data_cfg.local_data_root is set → load from that local path.
+    2. Elif data_cfg.allow_hf_snapshot_download=true → use snapshot_download.
+    3. Else → raise clear error.
+
+    Args:
+        data_cfg: OmegaConf node or dict with fields:
+            - local_data_root: str (optional, empty = not set)
+            - allow_hf_snapshot_download: bool (default False)
+            - allow_fallback: bool (default False)
+            - allow_sanity_prompt_fallback: bool (default False)
+            - max_concepts: int (optional)
+            - max_train_images_per_concept: int (optional)
+            - max_eval_prompts_per_concept: int (optional)
+            - hf_repo_id: str (default "yuangpeng/dreambench_plus")
+            - print_dataset_tree_on_error: bool (default True)
+            - max_tree_depth: int (default 3)
+            - max_tree_files: int (default 200)
+
+    Returns:
+        List of concept dicts, each with keys:
+            concept_id, category, train_images, eval_prompts,
+            reference_images, metadata.
+
+    Raises:
+        RuntimeError: If loading fails and allow_fallback=False.
+        ValueError: If the loaded dataset fails validation.
+    """
+    # -----------------------------------------------------------------------
+    # Read config fields
+    # -----------------------------------------------------------------------
+    def _get(key, default=None):
+        if hasattr(data_cfg, "get"):
+            return data_cfg.get(key, default)
+        try:
+            from omegaconf import OmegaConf
+            val = OmegaConf.select(data_cfg, key, default=default)
+            return val if val is not None else default
+        except Exception:
+            return getattr(data_cfg, key, default)
+
+    allow_hf_snapshot = bool(_get("allow_hf_snapshot_download", False))
+    allow_fallback = bool(_get("allow_fallback", False))
+    allow_sanity_prompt_fallback = bool(_get("allow_sanity_prompt_fallback", False))
+    max_concepts = _get("max_concepts", None)
+    max_train_images = _get("max_train_images_per_concept", None)
+    max_eval_prompts = _get("max_eval_prompts_per_concept", None)
+    hf_repo_id = _get("hf_repo_id", "yuangpeng/dreambench_plus")
+    print_tree_on_error = bool(_get("print_dataset_tree_on_error", True))
+    max_tree_depth = int(_get("max_tree_depth", 3))
+    max_tree_files = int(_get("max_tree_files", 200))
+
+    if max_train_images is not None:
+        max_train_images = int(max_train_images)
+    if max_eval_prompts is not None:
+        max_eval_prompts = int(max_eval_prompts)
+    if max_concepts is not None:
+        max_concepts = int(max_concepts)
+
+    # -----------------------------------------------------------------------
+    # Resolve data root
+    # -----------------------------------------------------------------------
+    local_root = resolve_dreambench_plus_root(data_cfg)
+
+    if local_root is not None:
+        root_path = Path(local_root)
+        logger.info("DreamBench++: loading from local path: %s", root_path)
+        if not root_path.exists():
+            msg = f"DreamBench++ local_data_root does not exist: {root_path}"
+            if print_tree_on_error:
+                parent = root_path.parent
+                if parent.exists():
+                    logger.error("%s\nParent directory tree:\n%s", msg,
+                                 print_directory_tree(str(parent), max_tree_depth, max_tree_files))
+            raise FileNotFoundError(msg)
+    elif allow_hf_snapshot:
+        logger.info(
+            "DreamBench++: no local_data_root set; using snapshot_download(repo_id='%s')",
+            hf_repo_id,
+        )
+        try:
+            from huggingface_hub import snapshot_download
+            hf_token = os.environ.get("HF_TOKEN")
+            kwargs: Dict[str, Any] = {"repo_id": hf_repo_id, "repo_type": "dataset"}
+            if hf_token:
+                kwargs["token"] = hf_token
+            local_root = snapshot_download(**kwargs)
+            root_path = Path(local_root)
+            logger.info("DreamBench++: snapshot downloaded to %s", root_path)
+        except Exception as e:
+            msg = f"DreamBench++ snapshot_download failed: {e}"
+            logger.error(msg)
+            raise RuntimeError(msg) from e
+    else:
+        raise RuntimeError(
+            "DreamBench++: local_data_root is not set and "
+            "allow_hf_snapshot_download=false. "
+            "Either set data.local_data_root to a local path, or set "
+            "data.allow_hf_snapshot_download=true to auto-download via HuggingFace Hub."
+        )
+
+    # -----------------------------------------------------------------------
+    # Handle zip-based layout (yuangpeng/dreambench_plus stores data.zip)
+    # -----------------------------------------------------------------------
+    root_path = _resolve_dreambench_plus_zip(root_path)
+
+    # -----------------------------------------------------------------------
+    # Scan directory for concepts
+    # -----------------------------------------------------------------------
+    concepts = _scan_dreambench_plus_root(
+        root_path=root_path,
+        max_concepts=max_concepts,
+        max_train_images=max_train_images,
+        max_eval_prompts=max_eval_prompts,
+        allow_sanity_prompt_fallback=allow_sanity_prompt_fallback,
+        print_tree_on_error=print_tree_on_error,
+        max_tree_depth=max_tree_depth,
+        max_tree_files=max_tree_files,
+    )
+
+    # -----------------------------------------------------------------------
+    # Validate
+    # -----------------------------------------------------------------------
+    _validate_dreambench_plus(concepts, data_cfg)
+
+    return concepts
+
+
+def _resolve_dreambench_plus_zip(root_path: Path) -> Path:
+    """Handle the yuangpeng/dreambench_plus zip-based layout.
+
+    The official HuggingFace snapshot for yuangpeng/dreambench_plus contains:
+      data.zip — archive with structure:
+        data/images/{category}/{id}.jpg   — one image per concept
+        data/captions/{category}/{id}.txt — first line: concept name; rest: prompts
+
+    If root_path contains a data.zip (and no concept subdirectories or images),
+    extract the zip to root_path/extracted/ and build per-concept directories
+    with images and metadata.json.
+
+    Returns:
+        Path to a directory with per-concept subdirectories (may be newly created).
+    """
+    import zipfile
+
+    zip_path = root_path / "data.zip"
+    if not zip_path.exists():
+        return root_path
+
+    # Check if already extracted
+    extracted_root = root_path / "extracted"
+    concepts_dir = extracted_root / "concepts"
+    if concepts_dir.exists() and any(concepts_dir.iterdir()):
+        logger.info("DreamBench++: using already-extracted concepts at %s", concepts_dir)
+        return concepts_dir
+
+    logger.info("DreamBench++: extracting data.zip to %s ...", extracted_root)
+    extracted_root.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(str(extracted_root))
+
+    logger.info("DreamBench++: extracted data.zip successfully")
+
+    # Build per-concept directory layout
+    # Structure: data/images/{category}/{id}.jpg + data/captions/{category}/{id}.txt
+    data_dir = extracted_root / "data"
+    images_dir = data_dir / "images"
+    captions_dir = data_dir / "captions"
+
+    if not images_dir.exists():
+        logger.warning(
+            "DreamBench++: data.zip extracted but no data/images/ directory found at %s",
+            extracted_root,
+        )
+        return extracted_root
+
+    concepts_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collect all concepts: each category/{id}.jpg is a concept
+    # id links captions/{category}/{id}.txt
+    num_created = 0
+    for category_dir in sorted(images_dir.iterdir()):
+        if not category_dir.is_dir():
+            continue
+        category = category_dir.name
+        for img_file in sorted(category_dir.iterdir()):
+            if img_file.suffix.lower() not in _DREAMBENCH_IMAGE_EXTENSIONS:
+                continue
+            concept_idx = img_file.stem  # e.g. "00", "01"
+            concept_name = f"{category}_{concept_idx}"
+
+            # Read captions if available
+            cap_file = captions_dir / category / f"{concept_idx}.txt"
+            prompts: List[str] = []
+            concept_label: Optional[str] = None
+            if cap_file.exists():
+                lines = cap_file.read_text(encoding="utf-8").strip().splitlines()
+                if lines:
+                    concept_label = lines[0].strip()  # first line = concept name
+                    prompts = [l.strip() for l in lines[1:] if l.strip()]
+
+            # Create concept directory
+            concept_dir = concepts_dir / concept_name
+            concept_dir.mkdir(parents=True, exist_ok=True)
+
+            # Symlink or copy image
+            dest_img = concept_dir / img_file.name
+            if not dest_img.exists():
+                try:
+                    dest_img.symlink_to(img_file.resolve())
+                except Exception:
+                    import shutil
+                    shutil.copy2(str(img_file), str(dest_img))
+
+            # Write metadata.json
+            meta_path = concept_dir / "metadata.json"
+            if not meta_path.exists():
+                meta = [{
+                    "image": img_file.name,
+                    "prompts": prompts,
+                    "concept_label": concept_label or concept_name,
+                    "category": category,
+                }]
+                meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+            num_created += 1
+
+    logger.info(
+        "DreamBench++: created %d concept directories in %s", num_created, concepts_dir
+    )
+    return concepts_dir
+
+
+def _scan_dreambench_plus_root(
+    root_path: Path,
+    max_concepts: Optional[int],
+    max_train_images: Optional[int],
+    max_eval_prompts: Optional[int],
+    allow_sanity_prompt_fallback: bool,
+    print_tree_on_error: bool,
+    max_tree_depth: int,
+    max_tree_files: int,
+) -> List[dict]:
+    """Scan the DreamBench++ root directory and extract concept dicts.
+
+    Handles two layouts:
+    - Flat: root contains per-concept subdirectories (most common DreamBench++ layout).
+    - Flat with top-level metadata: root contains a metadata JSON plus images.
+
+    Returns:
+        List of concept dicts.
+    """
+    concepts: List[dict] = []
+
+    # Check if root itself contains images (single-concept flat layout)
+    root_images = [
+        p for p in sorted(root_path.iterdir())
+        if p.is_file() and p.suffix.lower() in _DREAMBENCH_IMAGE_EXTENSIONS
+    ]
+
+    # Look for top-level metadata
+    top_meta_file = _find_metadata_file(root_path)
+    top_metadata: Dict[str, List[str]] = {}
+    if top_meta_file:
+        top_metadata = _parse_metadata_file(top_meta_file, root_path)
+        logger.info("DreamBench++: found top-level metadata at %s", top_meta_file)
+
+    # Get subdirectories (concept dirs)
+    subdirs = sorted([
+        d for d in root_path.iterdir()
+        if d.is_dir() and d.name not in _EXCLUDE_DIRS
+    ])
+
+    if not subdirs and not root_images:
+        msg = (
+            f"DreamBench++: no concept subdirectories or images found in {root_path}. "
+            "Expected one subdirectory per concept, each containing concept images."
+        )
+        if print_tree_on_error:
+            logger.error("%s\nDirectory tree:\n%s", msg,
+                         print_directory_tree(str(root_path), max_tree_depth, max_tree_files))
+        raise RuntimeError(msg)
+
+    if subdirs:
+        # Standard layout: each subdir is a concept
+        for concept_dir in subdirs:
+            if max_concepts is not None and len(concepts) >= max_concepts:
+                break
+
+            concept_id = concept_dir.name
+            # Look for concept-level metadata file
+            local_meta = _find_metadata_file(concept_dir)
+            local_metadata: Dict[str, List[str]] = {}
+            if local_meta:
+                local_metadata = _parse_metadata_file(local_meta, concept_dir)
+
+            # Merge: local metadata takes priority over top-level
+            merged_metadata: Dict[str, List[str]] = {**top_metadata, **local_metadata}
+
+            # Try to find prompts for this concept in top-level metadata
+            concept_meta_prompts: List[str] = []
+            for key in [concept_id, f"__concept__{concept_id}"]:
+                if key in merged_metadata:
+                    concept_meta_prompts = merged_metadata[key]
+                    break
+
+            # Build metadata with concept-level prompts injected if found
+            effective_metadata = dict(merged_metadata)
+            if concept_meta_prompts:
+                # Inject concept prompts so they're picked up
+                effective_metadata[f"__concept__{concept_id}"] = concept_meta_prompts
+
+            concept_dict = _build_concept_from_dir(
+                concept_dir=concept_dir,
+                concept_id=concept_id,
+                category=None,
+                metadata=effective_metadata,
+                max_train_images=max_train_images,
+                max_eval_prompts=max_eval_prompts,
+                allow_sanity_prompt_fallback=allow_sanity_prompt_fallback,
+            )
+            if concept_dict is None:
+                if allow_sanity_prompt_fallback:
+                    logger.warning(
+                        "DreamBench++: concept '%s' has no images or prompts — skipping.",
+                        concept_id,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"DreamBench++: concept '{concept_id}' has no eval prompts and "
+                        "allow_sanity_prompt_fallback=false. "
+                        "Please add a metadata file with prompts, or set "
+                        "data.allow_sanity_prompt_fallback=true."
+                    )
+            else:
+                concepts.append(concept_dict)
+    else:
+        # Flat layout: root dir is single concept
+        concept_id = root_path.name
+        concept_dict = _build_concept_from_dir(
+            concept_dir=root_path,
+            concept_id=concept_id,
+            category=None,
+            metadata=top_metadata,
+            max_train_images=max_train_images,
+            max_eval_prompts=max_eval_prompts,
+            allow_sanity_prompt_fallback=allow_sanity_prompt_fallback,
+        )
+        if concept_dict is not None:
+            concepts.append(concept_dict)
+
+    return concepts
+
+
+def _validate_dreambench_plus(concepts: List[dict], data_cfg) -> None:
+    """Validate loaded DreamBench++ concepts.
+
+    Checks:
+    - At least one concept.
+    - Each concept has >=1 train image.
+    - Each concept has >=1 eval prompt (unless evaluation.enabled=False).
+    - All image paths exist.
+    - Images can be opened by PIL.
+    - Prompts are non-empty strings.
+
+    Raises:
+        ValueError: On validation failure.
+    """
+    def _get(key, default=None):
+        if hasattr(data_cfg, "get"):
+            return data_cfg.get(key, default)
+        try:
+            from omegaconf import OmegaConf
+            val = OmegaConf.select(data_cfg, key, default=default)
+            return val if val is not None else default
+        except Exception:
+            return getattr(data_cfg, key, default)
+
+    eval_enabled = _get("evaluation_enabled", True)
+
+    if not concepts:
+        raise ValueError(
+            "DreamBench++: loaded 0 concepts. "
+            "Check that your data root contains concept subdirectories with images."
+        )
+
+    for concept in concepts:
+        cid = concept["concept_id"]
+
+        # Check train images
+        train_images = concept.get("train_images", [])
+        if not train_images:
+            raise ValueError(f"DreamBench++ concept '{cid}': no train images found.")
+
+        # Validate image existence and openability
+        for img_path in train_images:
+            p = Path(img_path)
+            if not p.exists():
+                raise ValueError(
+                    f"DreamBench++ concept '{cid}': image does not exist: {img_path}"
+                )
+            try:
+                with Image.open(p) as img:
+                    img.verify()
+            except Exception as e:
+                raise ValueError(
+                    f"DreamBench++ concept '{cid}': cannot open image {img_path}: {e}"
+                ) from e
+
+        # Check eval prompts
+        eval_prompts = concept.get("eval_prompts", [])
+        if eval_enabled and not eval_prompts:
+            raise ValueError(
+                f"DreamBench++ concept '{cid}': no eval prompts found and "
+                "evaluation is enabled. Add a metadata file with prompts, or set "
+                "evaluation.enabled=false, or set data.allow_sanity_prompt_fallback=true."
+            )
+
+        # Validate prompts
+        for prompt in eval_prompts:
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise ValueError(
+                    f"DreamBench++ concept '{cid}': invalid prompt (empty or not string): "
+                    f"{repr(prompt)}"
+                )
 
 
 def _load_images_from_dir(image_dir: str) -> List[Path]:

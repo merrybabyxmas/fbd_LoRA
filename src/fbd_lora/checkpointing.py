@@ -188,7 +188,7 @@ class FBDCheckpointCallback(TrainerCallback):
                 except Exception:
                     pass
 
-            # GDrive upload
+            # GDrive upload → verify → delete local
             if self.gdrive_remote:
                 upload_result = sync_to_gdrive(
                     local_dir=str(ckpt_dir),
@@ -197,16 +197,51 @@ class FBDCheckpointCallback(TrainerCallback):
                     run_id=self.run_id,
                     subpath=f"checkpoints/{label}",
                     dry_run=self.dry_run_gdrive,
+                    delete_local_after_upload=True,
                 )
-                upload_success = upload_result.get("success", False)
-                # Update metadata with upload status
-                meta_path = ckpt_dir / "metadata.json"
-                meta = json.loads(meta_path.read_text())
-                meta["gdrive_upload"] = upload_result
-                meta_path.write_text(json.dumps(meta, indent=2))
+                uploaded = upload_result.get("success", False)
+                verified = upload_result.get("verified", False)
+                deleted = upload_result.get("deleted_local", False)
 
-                if not upload_success:
-                    logger.warning("GDrive upload failed for step %d: %s", step, upload_result.get("error"))
+                if uploaded and verified and deleted:
+                    logger.info(
+                        "[GDrive] ✓ step=%d: uploaded, verified, local deleted → %s",
+                        step, upload_result.get("remote_path"),
+                    )
+                elif uploaded and verified:
+                    logger.warning("[GDrive] step=%d: uploaded+verified but local delete failed", step)
+                elif uploaded:
+                    # Verification failed → local retained; write metadata while dir still exists
+                    logger.warning(
+                        "[GDrive] step=%d: upload succeeded but verification failed — local retained. err=%s",
+                        step, upload_result.get("error"),
+                    )
+                    meta_path = ckpt_dir / "metadata.json"
+                    if meta_path.exists():
+                        meta = json.loads(meta_path.read_text())
+                        meta["gdrive_upload"] = upload_result
+                        meta_path.write_text(json.dumps(meta, indent=2))
+                else:
+                    logger.warning(
+                        "[GDrive] step=%d: upload failed — local retained. err=%s",
+                        step, upload_result.get("error"),
+                    )
+                    meta_path = ckpt_dir / "metadata.json"
+                    if meta_path.exists():
+                        meta = json.loads(meta_path.read_text())
+                        meta["gdrive_upload"] = upload_result
+                        meta_path.write_text(json.dumps(meta, indent=2))
+
+                # W&B log gdrive status
+                if self.wandb_run is not None:
+                    try:
+                        self.wandb_run.log({
+                            "gdrive/uploaded": int(uploaded),
+                            "gdrive/verified": int(verified),
+                            "gdrive/local_deleted": int(deleted),
+                        })
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error("Checkpoint save failed at step %d: %s", step, e)

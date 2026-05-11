@@ -385,6 +385,94 @@ A sanity run is considered **FAIL** if any of the above conditions are not met.
 
 ---
 
+## DreamBench++ Loading
+
+DreamBench++ is loaded via the **official-file approach** using `huggingface_hub.snapshot_download`, which avoids the `datasets.load_dataset("yuangpeng/dreambench_plus")` call that fails in most environments.
+
+### How it works
+
+`fbd_lora.imagen.data.load_dreambench_plus(data_cfg)` implements the following loading priority:
+
+1. **Local path**: If `data.local_data_root` is set (non-empty), load from that directory.
+2. **HuggingFace snapshot**: If `data.allow_hf_snapshot_download=true`, call `snapshot_download(repo_id="yuangpeng/dreambench_plus", repo_type="dataset")` to download all files to a local cache.
+3. **Error**: If neither applies, raise a clear `RuntimeError` explaining the options.
+
+### Dataset directory layout
+
+The loader expects one subdirectory per concept, each containing images:
+
+```
+dreambench_plus/
+  dog_statue/
+    image_000.jpg
+    image_001.jpg
+    metadata.json          # optional: prompts
+  teapot/
+    image_000.jpg
+    eval_prompts.txt       # alternative: one prompt per line
+  backpack/
+    ...
+```
+
+### Supported metadata formats
+
+| Format | File | Description |
+|--------|------|-------------|
+| JSON list | `metadata.json` | `[{"image": "img.jpg", "prompts": ["..."]}]` |
+| JSON dict (items) | `metadata.json` | `{"items": [{"image_path": "img.jpg", "prompt": "..."}]}` |
+| JSON mapping | `metadata.json` | `{"concept_001": {"image": "img.jpg", "prompts": [...]}}` |
+| JSONL | `metadata.jsonl` | one `{"image": "...", "prompt": "..."}` per line |
+| CSV/TSV | `metadata.csv` | columns: `image`/`image_path`/`filename`, `prompt`/`prompts`/`text` |
+| Plain text | `eval_prompts.txt` | one prompt per line (fallback if no JSON/CSV) |
+
+### Config fields
+
+```yaml
+dataset:
+  name: dreambench_plus               # use new official-file loader
+  hf_repo_id: yuangpeng/dreambench_plus
+  local_data_root: ${FBD_DREAMBENCH_PLUS_ROOT:-}  # set to use local path
+  allow_hf_snapshot_download: true    # auto-download via HF Hub
+  allow_fallback: false               # never silently switch to MS-Bench
+  allow_sanity_prompt_fallback: false # fail clearly if no prompts found
+  max_concepts: 1                     # load only 1 concept (sanity)
+  max_train_images_per_concept: 4
+  max_eval_prompts_per_concept: 2
+```
+
+### Environment variables
+
+```bash
+# Point to a local copy of the dataset (priority over snapshot_download)
+export FBD_DREAMBENCH_PLUS_ROOT=/path/to/dreambench_plus
+
+# HF token (for private repos or rate-limited downloads)
+export HF_TOKEN=your_token
+```
+
+### Fallback policy
+
+The loader **never silently switches to MS-Bench**. If DreamBench++ loading fails:
+- If `allow_fallback=true`: logs a clear `[WARNING]` and switches to MS-Bench; run name includes `msbench_fallback`.
+- If `allow_fallback=false` (default): raises `RuntimeError` with a clear message.
+
+### Sanity scripts
+
+```bash
+# DreamBench++ — FBD and LoRA (20 steps each on SD v1.5)
+bash scripts/sanity/imagen/dreambench/train_fbd_sd15_dreambench_plus.sh 1 false
+bash scripts/sanity/imagen/dreambench/train_lora_sd15_dreambench_plus.sh 1 false
+
+# DreamBench++ — DreamBooth and Custom Diffusion (stubs, dry-run only)
+DRY_RUN=1 bash scripts/sanity/imagen/dreambench/train_dreambooth_sd15_dreambench_plus.sh 1 false
+DRY_RUN=1 bash scripts/sanity/imagen/dreambench/train_custom_diffusion_sd15_dreambench_plus.sh 1 false
+
+# Dry-run validation (no GPU needed)
+DRY_RUN=1 bash scripts/sanity/imagen/dreambench/train_fbd_sd15_dreambench_plus.sh 0 false
+```
+
+---
+
 ## Aggregators (run multiple methods sequentially)
 
 ```bash

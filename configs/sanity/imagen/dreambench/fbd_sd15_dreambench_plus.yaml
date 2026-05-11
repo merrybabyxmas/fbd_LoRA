@@ -15,13 +15,24 @@ model:
   gradient_checkpointing: true
 
 dataset:
-  name: dreambench_plus_hf
+  name: dreambench_plus
+  hf_repo_id: yuangpeng/dreambench_plus
   hf_path: yuangpeng/dreambench_plus
   hf_split: test
   concept_id: 0
   max_train_images_per_concept: 4
   max_eval_prompts_per_concept: 2
-  # Fallback local dir if HF loading fails (optional)
+  max_concepts: 1
+  # Official-file loader settings (replaces datasets.load_dataset)
+  local_data_root: ${oc.env:FBD_DREAMBENCH_PLUS_ROOT,}
+  allow_hf_snapshot_download: true
+  allow_fallback: false
+  allow_sanity_prompt_fallback: false
+  fallback_dataset_name: doge1516/MS-Bench
+  print_dataset_tree_on_error: true
+  max_tree_depth: 3
+  max_tree_files: 200
+  # Legacy fields kept for compatibility
   root: data/dreambench_plus
   resolution: 512
   center_crop: false

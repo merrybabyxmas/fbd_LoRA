@@ -105,7 +105,7 @@ run:
   deterministic: false
   resume_from_checkpoint: null
   save_every_percent: 10
-  upload_to_gdrive: false
+  upload_to_gdrive: true
   dry_run: false
   debug: false
 

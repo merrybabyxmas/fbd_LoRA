@@ -135,14 +135,16 @@ def main() -> None:
     dataset_root = OmegaConf.select(cfg, "dataset.root", default="data/customconcept101")
     concept_dir_override = args.concept_dir
 
-    if concept_dir_override is None and dataset_name_cfg in ("msbench_hf", "dreambench_plus_hf"):
-        from fbd_lora.imagen.data import load_msbench_concept, load_dreambench_plus_concept
+    if concept_dir_override is None and dataset_name_cfg in (
+        "msbench_hf", "dreambench_plus_hf", "dreambench_plus", "dreambench_plus_official"
+    ):
         hf_token = os.environ.get("HF_TOKEN")
         concept_id = int(OmegaConf.select(cfg, "dataset.concept_id", default=0))
         max_train_images = int(OmegaConf.select(cfg, "dataset.max_train_images_per_concept", default=4))
         hf_split = OmegaConf.select(cfg, "dataset.hf_split", default="train")
 
         if dataset_name_cfg == "msbench_hf":
+            from fbd_lora.imagen.data import load_msbench_concept
             logger.info("Loading MS-Bench concept %d from HuggingFace...", concept_id)
             concept_dir_hf = load_msbench_concept(
                 output_dir=str(Path(dataset_root)),
@@ -151,7 +153,40 @@ def main() -> None:
                 hf_token=hf_token,
             )
             concept_name = f"msbench_concept_{concept_id:02d}"
-        else:  # dreambench_plus_hf
+            concept_dir = concept_dir_hf
+        elif dataset_name_cfg in ("dreambench_plus", "dreambench_plus_official"):
+            # Use new official-file loader via snapshot_download
+            from fbd_lora.imagen.data import load_dreambench_plus
+            dataset_cfg_node = OmegaConf.select(cfg, "dataset", default={})
+            logger.info("Loading DreamBench++ via official-file loader...")
+            allow_fallback = OmegaConf.select(cfg, "dataset.allow_fallback", default=False)
+            try:
+                db_concepts = load_dreambench_plus(dataset_cfg_node)
+            except Exception as db_exc:
+                if allow_fallback:
+                    logger.warning(
+                        "[WARNING] DreamBench++ loading failed. Falling back to MS-Bench "
+                        "because allow_fallback=true. Error: %s", db_exc
+                    )
+                    from fbd_lora.imagen.data import load_msbench_concept
+                    concept_dir_hf = load_msbench_concept(
+                        output_dir=str(Path(dataset_root) / "msbench"),
+                        concept_id=concept_id,
+                        max_images=max_train_images,
+                        hf_token=hf_token,
+                    )
+                    concept_name = f"msbench_fallback_concept_{concept_id:02d}"
+                    concept_dir = concept_dir_hf
+                else:
+                    raise
+            else:
+                # Use first concept (or concept at index concept_id)
+                idx = min(concept_id, len(db_concepts) - 1)
+                selected = db_concepts[idx]
+                concept_name = f"dreambench_{selected['concept_id']}"
+                concept_dir = str(Path(selected["train_images"][0]).parent)
+        else:  # dreambench_plus_hf (legacy)
+            from fbd_lora.imagen.data import load_dreambench_plus_concept
             logger.info("Loading DreamBench+ concept %d from HuggingFace...", concept_id)
             concept_dir_hf = load_dreambench_plus_concept(
                 output_dir=str(Path(dataset_root)),
@@ -161,8 +196,7 @@ def main() -> None:
                 hf_token=hf_token,
             )
             concept_name = f"dreambench_concept_{concept_id:02d}"
-
-        concept_dir = concept_dir_hf
+            concept_dir = concept_dir_hf
     else:
         concept_dir = concept_dir_override or str(Path(dataset_root) / concept_name)
 

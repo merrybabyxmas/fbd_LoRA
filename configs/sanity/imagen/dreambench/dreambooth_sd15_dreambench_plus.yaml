@@ -1,7 +1,7 @@
 project:
   name: fbd-lora
   run_group: sanity-imagen-dreambench
-  notes: "Real-data sanity run: 20 steps on SD1.5 + yuangpeng/dreambench_plus. DreamBench++ load may fail; fallback to MS-Bench."
+  notes: "Real-data sanity run: 20 steps on SD1.5 + yuangpeng/dreambench_plus (DreamBooth adapter)."
 
 modality: imagen
 task: dreambench_sanity
@@ -59,8 +59,8 @@ training:
   validation_steps: 10
 
 adapter:
-  name: lora
-  type: lora
+  name: dreambooth
+  type: dreambooth
   base_adapter: lora
   rank: 4
   alpha: 4
@@ -121,7 +121,7 @@ wandb:
   mode: ${oc.env:WANDB_MODE,online}
   log_model: false
   tags:
-    - lora
+    - dreambooth
     - sd15
     - dreambench_plus
     - sanity
