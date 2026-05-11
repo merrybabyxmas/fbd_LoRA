@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Code Generation — AdaLoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Code Generation — AdaLoRA
+# Status: REAL via PEFT AdaLoraConfig
 # Usage: bash scripts/nlg/code/train_adalora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

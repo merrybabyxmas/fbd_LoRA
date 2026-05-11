@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Conversation — DoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Conversation — DoRA
+# Status: REAL via PEFT LoraConfig(use_dora=True)
 # Usage: bash scripts/nlg/conversation/train_dora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

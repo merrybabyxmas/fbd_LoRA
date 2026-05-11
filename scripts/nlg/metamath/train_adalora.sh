@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: MetaMath — AdaLoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: MetaMath — AdaLoRA
+# Status: REAL via PEFT AdaLoraConfig
 # Usage: bash scripts/nlg/metamath/train_adalora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

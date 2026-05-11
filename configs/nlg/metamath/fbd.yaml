@@ -1,6 +1,8 @@
 project:
   name: fbd-lora
   run_group: nlg-metamath-main
+  status: REAL
+  method_class: internal
 
 modality: nlg
 task: metamath
@@ -15,12 +17,12 @@ model:
   use_flash_attention_2: false
 
 dataset:
-  name: MetaMathQA
-  hf_path: meta-math/MetaMathQA
-  subset: null
+  name: pissa-dataset
+  hf_path: fxmeng/pissa-dataset
+  sub_task: metamath
   split: train
   max_samples: 100000
-  prompt_template: alpaca_math
+  prompt_template: alpaca
   max_seq_length: 2048
   packing: false
 
@@ -44,6 +46,7 @@ training:
   gradient_checkpointing: true
 
 adapter:
+  type: fbd
   name: fbd
   base_adapter: lora
   rank: 16
@@ -104,7 +107,10 @@ wandb:
   entity: ${oc.env:WANDB_ENTITY,null}
   mode: ${oc.env:WANDB_MODE,online}
   log_model: false
-  tags: []
+  tags:
+    - fbd
+    - metamath
+    - pissa-dataset
 
 run:
   seed: 42

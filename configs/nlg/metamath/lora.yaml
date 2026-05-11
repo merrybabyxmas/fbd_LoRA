@@ -1,6 +1,8 @@
 project:
   name: fbd-lora
   run_group: nlg-metamath-baseline
+  status: REAL
+  method_class: peft_official
 
 modality: nlg
 task: metamath
@@ -12,15 +14,15 @@ model:
   load_in_4bit: false
   load_in_8bit: false
   torch_dtype: bf16
-  use_flash_attention_2: true
+  use_flash_attention_2: false
 
 dataset:
-  name: MetaMathQA
-  hf_path: meta-math/MetaMathQA
-  subset: null
+  name: pissa-dataset
+  hf_path: fxmeng/pissa-dataset
+  sub_task: metamath
   split: train
   max_samples: 100000
-  prompt_template: alpaca_math
+  prompt_template: alpaca
   max_seq_length: 2048
   packing: false
 
@@ -44,6 +46,7 @@ training:
   gradient_checkpointing: true
 
 adapter:
+  type: lora
   name: lora
   base_adapter: lora
   rank: 16
@@ -104,7 +107,10 @@ wandb:
   entity: ${oc.env:WANDB_ENTITY,null}
   mode: ${oc.env:WANDB_MODE,online}
   log_model: false
-  tags: []
+  tags:
+    - lora
+    - metamath
+    - pissa-dataset
 
 run:
   seed: 42

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Code Generation — DoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Code Generation — DoRA
+# Status: REAL via PEFT LoraConfig(use_dora=True)
 # Usage: bash scripts/nlg/code/train_dora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

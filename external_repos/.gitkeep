@@ -1,0 +1,8 @@
+# This directory holds external repositories needed for EXTERNAL_REQUIRED baselines.
+# The repos themselves are NOT tracked in git (see .gitignore).
+# Clone them here before running the corresponding scripts:
+#
+#   git clone https://github.com/Outsider565/LoRA-GA external_repos/LoRA-GA
+#   git clone https://github.com/mkshing/svdiff-pytorch external_repos/SVDiff
+#   git clone https://github.com/IBM/DiffuseKronA external_repos/DiffuseKronA
+#   git clone https://github.com/adobe-research/custom-diffusion external_repos/custom-diffusion

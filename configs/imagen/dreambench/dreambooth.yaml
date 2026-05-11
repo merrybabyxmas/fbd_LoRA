@@ -1,10 +1,102 @@
-# PLACEHOLDER: DreamBench DreamBooth (full fine-tune, no LoRA) config
-# Status: NOT IMPLEMENTED — Full DreamBooth without LoRA is not integrated.
+# DreamBooth full fine-tuning config
+# Status: REAL via Hugging Face Diffusers official training script
+# Implementation: fbd_lora.imagen.train_dreambooth_full
+# Uses: diffusers official DreamBooth training APIs
 project:
   name: fbd-lora
-  status: placeholder
-  implemented: false
+  run_group: imagen-dreambench-baseline
+  status: REAL
+  method_class: diffusers_official
+  notes: "DreamBooth full fine-tuning. No LoRA. Uses Diffusers official DreamBooth training."
+
 modality: imagen
 task: dreambench
+
+model:
+  backbone: runwayml/stable-diffusion-v1-5
+  revision: null
+  variant: null
+  torch_dtype: fp16
+  enable_xformers_memory_efficient_attention: true
+  gradient_checkpointing: true
+
+dataset:
+  name: dreambench
+  root: data/dreambench
+  concept_list: data/dreambench/concepts.json
+  resolution: 512
+  center_crop: false
+  random_flip: true
+  train_text_encoder: false
+  prior_preservation: true
+  class_data_dir: data/dreambench_class_images
+  num_class_images: 200
+  instance_prompt_key: instance_prompt
+  class_prompt_key: class_prompt
+
+training:
+  output_dir: null
+  max_train_steps: 1000
+  train_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 5.0e-6
+  text_encoder_learning_rate: 5.0e-6
+  scale_lr: false
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 0.01
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0
+  mixed_precision: fp16
+  save_every_percent: 10
+  validation_steps: 100
+
 adapter:
   name: dreambooth
+  type: dreambooth
+  train_unet: true
+  train_text_encoder: false
+
+fbd:
+  enabled: false
+
+generation:
+  prompts_file: data/dreambench/eval_prompts.json
+  num_images_per_prompt: 4
+  guidance_scale: 7.5
+  num_inference_steps: 50
+  seed: 42
+
+evaluation:
+  metrics:
+    - clip_i
+    - dino
+    - clip_t
+    - lpips_diversity
+  reference_images_root: data/dreambench/reference_images
+
+paths:
+  output_root: outputs/runs
+  result_root: results
+  cache_root: .cache
+
+wandb:
+  enabled: true
+  project: fbd-lora
+  entity: null
+  mode: online
+  log_model: false
+  tags:
+    - dreambooth
+    - dreambench
+
+run:
+  seed: 42
+  deterministic: false
+  resume_from_checkpoint: null
+  save_every_percent: 10
+  upload_to_gdrive: false
+  dry_run: false
+  debug: false

@@ -1,10 +1,35 @@
-# PLACEHOLDER: DreamBench SVDiff config
-# Status: NOT IMPLEMENTED — SVDiff not yet integrated.
+# SVDiff config
+# Status: EXTERNAL_REQUIRED
+# Official repo: https://github.com/mkshing/svdiff-pytorch
+# (Note: dome272 repo is the paper reference; mkshing is the maintained implementation)
+# Expected local path: external_repos/SVDiff
+#
+# To set up: git clone https://github.com/mkshing/svdiff-pytorch external_repos/SVDiff
 project:
   name: fbd-lora
-  status: placeholder
-  implemented: false
+  run_group: imagen-dreambench-baseline
+  status: EXTERNAL_REQUIRED
+  method_class: external_repo
+  external_repo: https://github.com/mkshing/svdiff-pytorch
+  external_local_path: external_repos/SVDiff
+
 modality: imagen
 task: dreambench
+
+model:
+  backbone: runwayml/stable-diffusion-v1-5
+
+dataset:
+  name: dreambench
+  root: data/dreambench
+  concept_list: data/dreambench/concepts.json
+  resolution: 512
+
+training:
+  max_train_steps: 1000
+  train_batch_size: 1
+  learning_rate: 1.0e-4
+
 adapter:
   name: svdiff
+  type: svdiff

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Code Generation — PiSSA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Code Generation — PiSSA
+# Status: REAL via PEFT LoraConfig(init_lora_weights="pissa_niter_16")
 # Usage: bash scripts/nlg/code/train_pissa.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

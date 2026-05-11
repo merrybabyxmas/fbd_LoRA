@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Conversation — AdaLoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Conversation — AdaLoRA
+# Status: REAL via PEFT AdaLoraConfig
 # Usage: bash scripts/nlg/conversation/train_adalora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: Conversation — PiSSA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: Conversation — PiSSA
+# Status: REAL via PEFT LoraConfig(init_lora_weights="pissa_niter_16")
 # Usage: bash scripts/nlg/conversation/train_pissa.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

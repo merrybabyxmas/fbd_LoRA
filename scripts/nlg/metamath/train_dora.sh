@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FBD-LoRA: MetaMath — DoRA (PLACEHOLDER — NOT IMPLEMENTED)
+# FBD-LoRA: MetaMath — DoRA
+# Status: REAL via PEFT LoraConfig(use_dora=True)
 # Usage: bash scripts/nlg/metamath/train_dora.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
 set -euo pipefail
 

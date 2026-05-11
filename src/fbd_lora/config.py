@@ -113,10 +113,26 @@ def validate_config(cfg: dict, mode: str = "train") -> list:
             errors.append("Missing or placeholder: model.backbone")
 
         # adapter
+        adapter_type = _get_nested(cfg, "adapter", "type") or _get_nested(cfg, "adapter", "name") or ""
+        modality = cfg.get("modality", "nlg")
+        # Full fine-tuning imagen methods (dreambooth, custom_diffusion) don't use LoRA rank/alpha/dropout
+        _no_rank_types = frozenset({"dreambooth", "custom_diffusion"})
         for key in ("name", "rank", "alpha", "dropout"):
             val = _get_nested(cfg, "adapter", key)
             if val is None:
-                errors.append(f"Missing required field: adapter.{key}")
+                if key == "rank" and str(adapter_type).lower() == "adalora":
+                    # AdaLoRA uses init_r/target_r instead of rank
+                    if _get_nested(cfg, "adapter", "init_r") is None:
+                        errors.append("Missing required field: adapter.rank or adapter.init_r (for adalora)")
+                elif key in ("rank", "alpha", "dropout") and str(adapter_type).lower() in _no_rank_types:
+                    # Full fine-tuning methods don't have LoRA rank/alpha/dropout
+                    pass
+                elif key == "name":
+                    # Also accept adapter.type as an alias for adapter.name
+                    if _get_nested(cfg, "adapter", "type") is None:
+                        errors.append("Missing required field: adapter.name or adapter.type")
+                else:
+                    errors.append(f"Missing required field: adapter.{key}")
 
         # training block must exist
         if "training" not in cfg or not isinstance(cfg.get("training"), dict):

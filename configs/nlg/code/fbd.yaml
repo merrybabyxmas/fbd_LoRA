@@ -1,11 +1,128 @@
-# PLACEHOLDER: NLG Code Generation FBD-LoRA config
-# Status: NOT IMPLEMENTED
-# Code generation task not yet configured. Typical choice: HumanEval / MBPP.
 project:
   name: fbd-lora
-  status: placeholder
-  implemented: false
+  run_group: nlg-code-main
+  status: REAL
+  method_class: internal
+
 modality: nlg
 task: code
+
+model:
+  backbone: mistralai/Mistral-7B-v0.1
+  tokenizer: mistralai/Mistral-7B-v0.1
+  trust_remote_code: false
+  load_in_4bit: false
+  load_in_8bit: false
+  torch_dtype: bf16
+  use_flash_attention_2: false
+
+dataset:
+  name: pissa-dataset
+  hf_path: fxmeng/pissa-dataset
+  sub_task: python
+  split: train
+  max_samples: 100000
+  prompt_template: alpaca
+  max_seq_length: 2048
+  packing: false
+
+training:
+  output_dir: null
+  num_train_epochs: 1
+  max_steps: -1
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  max_grad_norm: 1.0
+  logging_steps: 10
+  eval_steps: 500
+  save_strategy: steps_by_percent
+  save_every_percent: 10
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+
 adapter:
+  type: fbd
   name: fbd
+  base_adapter: lora
+  rank: 16
+  alpha: 16
+  dropout: 0.05
+  bias: none
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  modules_to_save: []
+
+fbd:
+  enabled: true
+  routing_type: pullback_metric_mixed
+  metric_mode: diag
+  route_a: true
+  route_b: false
+  lambda_route: 0.25
+  epsilon: 1.0e-4
+  normalize_metric: rms
+  norm_match: true
+  alignment_gate: true
+  gate_type: hard
+  gate_temperature: 10.0
+  metric_cache: true
+  log_gradient_stats: true
+  gradient_stats_interval: 10
+
+evaluation:
+  enabled: true
+  tasks:
+    - humaneval
+    - mbpp
+  generation:
+    max_new_tokens: 512
+    temperature: 0.0
+    top_p: 1.0
+    do_sample: false
+  batch_size: 8
+
+paths:
+  output_root: outputs/runs
+  result_root: results
+  cache_root: .cache
+  gdrive_remote: ${oc.env:GDRIVE_REMOTE,fbd_gdrive}
+  gdrive_root: ${oc.env:GDRIVE_ROOT,FBD_LORA_EXPERIMENTS}
+
+secrets:
+  env_file: .env
+  require_wandb: true
+  require_gdrive: false
+
+wandb:
+  enabled: true
+  project: ${oc.env:WANDB_PROJECT,fbd-lora}
+  entity: ${oc.env:WANDB_ENTITY,null}
+  mode: ${oc.env:WANDB_MODE,online}
+  log_model: false
+  tags:
+    - fbd
+    - code
+    - pissa-dataset
+
+run:
+  seed: 42
+  deterministic: false
+  resume_from_checkpoint: null
+  save_every_percent: 10
+  upload_to_gdrive: false
+  dry_run: false
+  debug: false
+
+hardware:
+  mixed_precision: bf16
+  gradient_checkpointing: true
+  compile: false
+  num_workers: 4
