@@ -21,18 +21,19 @@ model:
   gradient_checkpointing: true
 
 dataset:
-  name: dreambench
-  root: data/dreambench
-  concept_list: data/dreambench/concepts.json
+  name: dreambench_plus
+  hf_repo_id: yuangpeng/dreambench_plus
+  local_data_root: ${oc.env:FBD_DREAMBENCH_PLUS_ROOT,}
+  allow_hf_snapshot_download: true
+  allow_fallback: false
+  allow_sanity_prompt_fallback: false
+  max_concepts: null
+  max_train_images_per_concept: null
+  max_eval_prompts_per_concept: null
+  print_dataset_tree_on_error: true
   resolution: 512
   center_crop: false
   random_flip: true
-  train_text_encoder: false
-  prior_preservation: true
-  class_data_dir: data/dreambench_class_images
-  num_class_images: 200
-  instance_prompt_key: instance_prompt
-  class_prompt_key: class_prompt
 
 training:
   output_dir: null
