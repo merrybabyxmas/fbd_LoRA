@@ -32,7 +32,7 @@ training:
   max_steps: -1
   per_device_train_batch_size: 4
   gradient_accumulation_steps: 8
-  learning_rate: 2.0e-4
+  learning_rate: 5.0e-5
   weight_decay: 0.0
   warmup_ratio: 0.03
   lr_scheduler_type: cosine
@@ -52,7 +52,7 @@ adapter:
   init_r: 24
   target_r: 16
   alpha: 16
-  dropout: 0.05
+  dropout: 0.0
   bias: none
   target_modules:
     - q_proj
