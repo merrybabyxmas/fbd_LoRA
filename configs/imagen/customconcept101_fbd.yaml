@@ -1,0 +1,106 @@
+project:
+  name: fbd-lora
+  run_group: imagen-customconcept101-main
+  notes: ""
+
+modality: imagen
+task: customconcept101
+
+model:
+  backbone: runwayml/stable-diffusion-v1-5
+  revision: null
+  variant: null
+  torch_dtype: fp16
+  enable_xformers_memory_efficient_attention: true
+  gradient_checkpointing: true
+
+dataset:
+  name: customconcept101
+  root: data/customconcept101
+  resolution: 512
+  center_crop: true
+  random_flip: true
+  train_text_encoder: false
+  prior_preservation: false
+  num_class_images: 0
+
+training:
+  output_dir: null
+  max_train_steps: 1000
+  train_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-4
+  text_encoder_learning_rate: 5.0e-6
+  scale_lr: false
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 0.01
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0
+  mixed_precision: fp16
+  save_every_percent: 10
+  validation_steps: 100
+
+adapter:
+  name: fbd
+  rank: 8
+  alpha: 8
+  dropout: 0.0
+  target_modules:
+    - to_q
+    - to_k
+    - to_v
+    - to_out.0
+
+fbd:
+  enabled: true
+  routing_type: pullback_metric_mixed
+  metric_mode: diag
+  route_a: true
+  route_b: false
+  lambda_route: 0.25
+  epsilon: 1.0e-4
+  normalize_metric: rms
+  norm_match: true
+  alignment_gate: true
+  gate_type: hard
+  gate_temperature: 10.0
+  metric_cache: true
+  log_gradient_stats: true
+  gradient_stats_interval: 10
+
+generation:
+  num_images_per_prompt: 4
+  guidance_scale: 7.5
+  num_inference_steps: 50
+  seed: 42
+
+evaluation:
+  metrics:
+    - clip_i
+    - dino
+    - clip_t
+
+paths:
+  output_root: outputs/runs
+  result_root: results
+  cache_root: .cache
+
+wandb:
+  enabled: true
+  project: fbd-lora
+  entity: null
+  mode: online
+  log_model: false
+  tags: []
+
+run:
+  seed: 42
+  deterministic: false
+  resume_from_checkpoint: null
+  save_every_percent: 10
+  upload_to_gdrive: false
+  dry_run: false
+  debug: false

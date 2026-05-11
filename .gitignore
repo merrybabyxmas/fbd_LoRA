@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Outputs and checkpoints (large files)
+outputs/
+results/
+wandb/
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Data images (large files)
+data/customconcept101/*/images/
+data/customconcept101/*/*.jpg
+data/customconcept101/*/*.png
+data/customconcept101/*/*.jpeg
+
+# Logs
+*.log
+nohup.out
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HuggingFace cache
+.hf_cache/
+
+.env
+.env.*
