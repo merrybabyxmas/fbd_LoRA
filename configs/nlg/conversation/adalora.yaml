@@ -49,8 +49,8 @@ adapter:
   type: adalora
   name: adalora
   base_adapter: adalora
-  init_r: 12
-  target_r: 8
+  init_r: 24
+  target_r: 16
   alpha: 16
   dropout: 0.05
   bias: none
