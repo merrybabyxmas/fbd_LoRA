@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# FBD-LoRA: MS-Bench — LoRA baseline real-data sanity run (SD1.5, 20 steps)
+# Fallback when DreamBench++ HF loading fails.
+# Usage: bash scripts/sanity/imagen/dreambench/train_lora_sd15_msbench.sh <GPU_IDS> <RUN_EVAL_AFTER_TRAIN>
+set -euo pipefail
+
+REPO_ROOT="/home/dongwoo39/papers/fbd_lora/forward-backward-decoupled-low-rank-adaptation"
+
+export TASK="sanity_imagen_msbench"
+export METHOD="lora"
+export CONFIG_PATH="${REPO_ROOT}/configs/sanity/imagen/dreambench/lora_sd15_msbench.yaml"
+export TRAIN_MODULE="fbd_lora.imagen.train_dreambooth_lora"
+export EVAL_MODULE="fbd_lora.imagen.evaluate_clip_dino"
+
+exec "${REPO_ROOT}/scripts/common/run_experiment.sh" "$@"

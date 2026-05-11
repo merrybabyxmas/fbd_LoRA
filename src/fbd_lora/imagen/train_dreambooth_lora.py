@@ -129,9 +129,43 @@ def main() -> None:
     output_root = OmegaConf.select(cfg, "paths.output_root", default="outputs/runs")
 
     # Resolve concept name and directory
+    # Support HF dataset loading for msbench_hf and dreambench_plus_hf
+    dataset_name_cfg = OmegaConf.select(cfg, "dataset.name", default="local")
     concept_name = args.concept_name or OmegaConf.select(cfg, "dataset.concept_name", default="concept")
     dataset_root = OmegaConf.select(cfg, "dataset.root", default="data/customconcept101")
-    concept_dir = args.concept_dir or str(Path(dataset_root) / concept_name)
+    concept_dir_override = args.concept_dir
+
+    if concept_dir_override is None and dataset_name_cfg in ("msbench_hf", "dreambench_plus_hf"):
+        from fbd_lora.imagen.data import load_msbench_concept, load_dreambench_plus_concept
+        hf_token = os.environ.get("HF_TOKEN")
+        concept_id = int(OmegaConf.select(cfg, "dataset.concept_id", default=0))
+        max_train_images = int(OmegaConf.select(cfg, "dataset.max_train_images_per_concept", default=4))
+        hf_split = OmegaConf.select(cfg, "dataset.hf_split", default="train")
+
+        if dataset_name_cfg == "msbench_hf":
+            logger.info("Loading MS-Bench concept %d from HuggingFace...", concept_id)
+            concept_dir_hf = load_msbench_concept(
+                output_dir=str(Path(dataset_root)),
+                concept_id=concept_id,
+                max_images=max_train_images,
+                hf_token=hf_token,
+            )
+            concept_name = f"msbench_concept_{concept_id:02d}"
+        else:  # dreambench_plus_hf
+            logger.info("Loading DreamBench+ concept %d from HuggingFace...", concept_id)
+            concept_dir_hf = load_dreambench_plus_concept(
+                output_dir=str(Path(dataset_root)),
+                concept_id=concept_id,
+                max_images=max_train_images,
+                hf_split=hf_split,
+                hf_token=hf_token,
+            )
+            concept_name = f"dreambench_concept_{concept_id:02d}"
+
+        concept_dir = concept_dir_hf
+    else:
+        concept_dir = concept_dir_override or str(Path(dataset_root) / concept_name)
+
     instance_prompt = args.instance_prompt or f"a photo of sks {concept_name.replace('_', ' ')}"
 
     # Build run ID

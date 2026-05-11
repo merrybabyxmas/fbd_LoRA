@@ -1,0 +1,129 @@
+project:
+  name: fbd-lora
+  run_group: sanity-nlg-metamath
+  status: REAL
+  method_class: peft_official
+  notes: "Real-data sanity run: 20 steps on Mistral-7B-v0.1 + fxmeng/pissa-dataset metamath."
+
+modality: nlg
+task: metamath
+
+model:
+  backbone: ${oc.env:FBD_MISTRAL_MODEL_PATH,mistralai/Mistral-7B-v0.1}
+  tokenizer: ${oc.env:FBD_MISTRAL_MODEL_PATH,mistralai/Mistral-7B-v0.1}
+  trust_remote_code: false
+  load_in_4bit: false
+  load_in_8bit: false
+  torch_dtype: bf16
+  use_flash_attention_2: false
+
+dataset:
+  name: pissa-dataset
+  hf_path: fxmeng/pissa-dataset
+  sub_task: metamath
+  split: train
+  max_samples: 256
+  prompt_template: alpaca
+  max_seq_length: 512
+  packing: false
+
+training:
+  output_dir: null
+  num_train_epochs: 1
+  max_steps: 20
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  max_grad_norm: 1.0
+  logging_steps: 1
+  eval_steps: null
+  save_strategy: steps_by_percent
+  save_every_percent: 50
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+
+adapter:
+  type: lora
+  name: lora
+  base_adapter: lora
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  bias: none
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  modules_to_save: []
+
+fbd:
+  enabled: false
+  routing_type: none
+  metric_mode: diag
+  route_a: false
+  route_b: false
+  lambda_route: 0.0
+  epsilon: 1.0e-4
+  normalize_metric: rms
+  norm_match: false
+  alignment_gate: false
+  gate_type: hard
+  gate_temperature: 10.0
+  metric_cache: false
+  log_gradient_stats: false
+  gradient_stats_interval: 10
+
+evaluation:
+  enabled: false
+  tasks:
+    - gsm8k
+  generation:
+    max_new_tokens: 512
+    temperature: 0.0
+    top_p: 1.0
+    do_sample: false
+  batch_size: 8
+
+paths:
+  output_root: outputs/runs
+  result_root: results
+  cache_root: .cache
+  gdrive_remote: ${oc.env:GDRIVE_REMOTE,fbd_gdrive}
+  gdrive_root: ${oc.env:GDRIVE_ROOT,FBD_LORA_EXPERIMENTS}
+
+secrets:
+  env_file: .env
+  require_wandb: false
+  require_gdrive: false
+
+wandb:
+  enabled: true
+  project: ${oc.env:WANDB_PROJECT,fbd-lora}
+  entity: ${oc.env:WANDB_ENTITY,null}
+  mode: ${oc.env:WANDB_MODE,online}
+  log_model: false
+  tags:
+    - lora
+    - metamath
+    - pissa-dataset
+    - sanity
+
+run:
+  seed: 42
+  deterministic: false
+  resume_from_checkpoint: null
+  save_every_percent: 50
+  upload_to_gdrive: false
+  dry_run: false
+  debug: false
+
+hardware:
+  mixed_precision: bf16
+  gradient_checkpointing: true
+  compile: false
+  num_workers: 0

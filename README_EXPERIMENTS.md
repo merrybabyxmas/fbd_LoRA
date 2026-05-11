@@ -273,6 +273,118 @@ cp .env.example .env
 
 ---
 
+## Real-Data Sanity Runs
+
+We do not use tiny-gpt2 as evidence for FBD-LoRA correctness. NLG real-data sanity uses
+Mistral-7B-v0.1 and `fxmeng/pissa-dataset`. Image real-data sanity uses Stable Diffusion
+v1.5 and DreamBench++ or MS-Bench.
+
+These are **20-step smoke tests** that verify the full training pipeline end-to-end with
+real models and real data, without requiring task-level evaluation (eval disabled by default).
+
+### Policy
+
+- Sanity configs live under `configs/sanity/` (separate from production configs in `configs/nlg/`, `configs/imagen/`)
+- Sanity scripts live under `scripts/sanity/` (separate from production scripts)
+- 20 steps, rank=8, alpha=16 for NLG; 20 steps, rank=4, alpha=4 for imagen
+- W&B enabled; checkpoints saved at 50% and 100%
+- Evaluation is disabled (pass `false` as the second argument, or set `evaluation.enabled: false` in config)
+
+### Environment Variables
+
+Set these in `.env` or export before running:
+
+```bash
+# Path to a local cache of Mistral-7B-v0.1 (optional — downloads from HF if not set)
+export FBD_MISTRAL_MODEL_PATH=/path/to/mistral-7b-v0-1
+
+# Path to a local cache of SD v1.5 (optional — downloads from HF if not set)
+export FBD_SD15_MODEL_PATH=/path/to/stable-diffusion-v1-5
+
+# W&B API key
+export WANDB_API_KEY=your_key
+
+# HuggingFace token (needed for gated models/datasets)
+export HF_TOKEN=your_token
+```
+
+### NLG Sanity Commands
+
+```bash
+# MetaMath — FBD, LoRA, DoRA, PiSSA, AdaLoRA (20 steps each on Mistral-7B-v0.1)
+bash scripts/sanity/nlg/metamath/train_fbd_mistral.sh 0 false
+bash scripts/sanity/nlg/metamath/train_lora_mistral.sh 0 false
+bash scripts/sanity/nlg/metamath/train_dora_mistral.sh 0 false
+bash scripts/sanity/nlg/metamath/train_pissa_mistral.sh 0 false
+bash scripts/sanity/nlg/metamath/train_adalora_mistral.sh 0 false
+
+# Conversation task — FBD and LoRA (20 steps each, sub_task: conversation)
+bash scripts/sanity/nlg/conversation/train_fbd_mistral.sh 0 false
+bash scripts/sanity/nlg/conversation/train_lora_mistral.sh 0 false
+
+# Code generation task — FBD and LoRA (20 steps each, sub_task: python)
+bash scripts/sanity/nlg/code/train_fbd_mistral.sh 0 false
+bash scripts/sanity/nlg/code/train_lora_mistral.sh 0 false
+```
+
+### Image Sanity Commands
+
+```bash
+# MS-Bench (fallback) — FBD and LoRA (20 steps each on SD v1.5)
+bash scripts/sanity/imagen/dreambench/train_fbd_sd15_msbench.sh 0 false
+bash scripts/sanity/imagen/dreambench/train_lora_sd15_msbench.sh 0 false
+
+# DreamBench++ — FBD and LoRA (20 steps each on SD v1.5; may fail to load dataset)
+bash scripts/sanity/imagen/dreambench/train_fbd_sd15_dreambench_plus.sh 0 false
+bash scripts/sanity/imagen/dreambench/train_lora_sd15_dreambench_plus.sh 0 false
+```
+
+### Sanity Config Layout
+
+```
+configs/sanity/
+  nlg/
+    metamath/
+      fbd_mistral.yaml        # FBD-LoRA, MetaMath, Mistral-7B-v0.1
+      lora_mistral.yaml       # LoRA baseline
+      dora_mistral.yaml       # DoRA
+      pissa_mistral.yaml      # PiSSA
+      adalora_mistral.yaml    # AdaLoRA
+    conversation/
+      fbd_mistral.yaml        # FBD-LoRA, conversation sub-task
+      lora_mistral.yaml       # LoRA baseline
+    code/
+      fbd_mistral.yaml        # FBD-LoRA, python (code) sub-task
+      lora_mistral.yaml       # LoRA baseline
+  imagen/
+    dreambench/
+      fbd_sd15_msbench.yaml           # FBD-LoRA, MS-Bench (doge1516/MS-Bench)
+      lora_sd15_msbench.yaml          # LoRA baseline, MS-Bench
+      fbd_sd15_dreambench_plus.yaml   # FBD-LoRA, DreamBench++
+      lora_sd15_dreambench_plus.yaml  # LoRA baseline, DreamBench++
+```
+
+### Dataset Notes
+
+- **NLG**: `fxmeng/pissa-dataset` — 798K examples, filtered by `type` field
+  (`metamath`, `python`, `conversation`). `max_samples: 256` limits loading to 256 rows.
+- **MS-Bench** (`doge1516/MS-Bench`): 40 rows, 7 concepts (labels 0–6), PIL images.
+  `concept_id: 0` downloads images for label 0 (typically 3–5 images).
+- **DreamBench++** (`yuangpeng/dreambench_plus`): may fail with `DatasetGenerationError`
+  on some environments. Use MS-Bench configs as the reliable fallback.
+
+### Pass / Fail Criteria
+
+A sanity run is considered **PASS** if:
+1. Training completes all 20 steps without exception
+2. Loss is finite (not NaN / inf) at the final step
+3. At least one checkpoint is saved
+4. W&B run is created (if `wandb.enabled: true`)
+
+A sanity run is considered **FAIL** if any of the above conditions are not met.
+
+---
+
 ## Aggregators (run multiple methods sequentially)
 
 ```bash

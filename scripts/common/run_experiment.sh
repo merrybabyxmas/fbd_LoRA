@@ -59,12 +59,11 @@ export PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}"
 export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
 export TOKENIZERS_PARALLELISM=false
 
-# NCCL multi-GPU fix
+# NCCL fix — RTX 4000 series does not support P2P or IB; disable unconditionally.
+# This is safe for all GPU generations and required for RTX 4xxx on single-GPU runs.
 NUM_GPUS=$(echo "${GPU_IDS}" | awk -F',' '{print NF}')
-if [[ "${NUM_GPUS}" -gt 1 ]]; then
-  export NCCL_P2P_DISABLE=1
-  export NCCL_IB_DISABLE=1
-fi
+export NCCL_P2P_DISABLE=1
+export NCCL_IB_DISABLE=1
 
 # Load .env if present (never print secret values)
 if [[ -f "${REPO_ROOT}/.env" ]]; then

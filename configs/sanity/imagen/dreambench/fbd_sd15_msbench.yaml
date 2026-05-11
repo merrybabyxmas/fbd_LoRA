@@ -1,0 +1,124 @@
+project:
+  name: fbd-lora
+  run_group: sanity-imagen-msbench
+  notes: "Real-data sanity run: 20 steps on SD1.5 + doge1516/MS-Bench. MS-Bench fallback for DreamBench++ loading failures."
+
+modality: imagen
+task: msbench_sanity
+
+model:
+  backbone: ${oc.env:FBD_SD15_MODEL_PATH,runwayml/stable-diffusion-v1-5}
+  revision: null
+  variant: null
+  torch_dtype: fp16
+  enable_xformers_memory_efficient_attention: true
+  gradient_checkpointing: true
+
+dataset:
+  name: msbench_hf
+  hf_path: doge1516/MS-Bench
+  hf_split: train
+  concept_id: 0
+  max_train_images_per_concept: 4
+  max_eval_prompts_per_concept: 2
+  root: data/msbench
+  resolution: 512
+  center_crop: false
+  random_flip: true
+  train_text_encoder: false
+
+training:
+  output_dir: null
+  max_train_steps: 20
+  train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-4
+  text_encoder_learning_rate: 5.0e-6
+  scale_lr: false
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 0.01
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0
+  mixed_precision: fp16
+  save_every_percent: 50
+  validation_steps: 10
+
+adapter:
+  name: fbd
+  type: fbd
+  base_adapter: lora
+  rank: 4
+  alpha: 4
+  dropout: 0.0
+  target_modules:
+    - to_q
+    - to_k
+    - to_v
+    - to_out.0
+  train_unet: true
+  train_text_encoder: false
+
+fbd:
+  enabled: true
+  routing_type: pullback_metric_mixed
+  metric_mode: diag
+  route_a: true
+  route_b: false
+  lambda_route: 0.5
+  epsilon: 1.0e-4
+  normalize_metric: rms
+  norm_match: true
+  alignment_gate: true
+  gate_type: hard
+  gate_temperature: 10.0
+  metric_cache: true
+  log_gradient_stats: true
+  gradient_stats_interval: 10
+
+generation:
+  enabled: true
+  num_images_per_prompt: 1
+  num_inference_steps: 20
+  guidance_scale: 7.5
+  seed: 42
+
+evaluation:
+  enabled: true
+  metrics:
+    - clip_i
+    - clip_t
+    - dino
+
+paths:
+  output_root: outputs/runs
+  result_root: results
+  cache_root: .cache
+
+secrets:
+  env_file: .env
+  require_wandb: false
+  require_gdrive: false
+
+wandb:
+  enabled: true
+  project: ${oc.env:WANDB_PROJECT,fbd-lora}
+  entity: ${oc.env:WANDB_ENTITY,null}
+  mode: ${oc.env:WANDB_MODE,online}
+  log_model: false
+  tags:
+    - fbd
+    - sd15
+    - msbench
+    - sanity
+
+run:
+  seed: 42
+  deterministic: false
+  resume_from_checkpoint: null
+  save_every_percent: 50
+  upload_to_gdrive: false
+  dry_run: false
+  debug: false

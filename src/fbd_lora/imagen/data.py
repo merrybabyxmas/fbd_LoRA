@@ -264,6 +264,158 @@ def download_customconcept101_concept(
         raise RuntimeError(f"Could not download concept '{concept_name}': {e}") from e
 
 
+def load_msbench_concept(
+    output_dir: str,
+    concept_id: int = 0,
+    max_images: int = 4,
+    hf_token: Optional[str] = None,
+) -> str:
+    """Load images for a single concept from doge1516/MS-Bench HuggingFace dataset.
+
+    MS-Bench has columns: image (PIL), label (int, 0-based concept index).
+
+    Args:
+        output_dir: Root directory to save extracted images.
+        concept_id: Integer concept index (0-6 for the 7 concepts in MS-Bench).
+        max_images: Maximum number of images to extract.
+        hf_token: Optional HF token.
+
+    Returns:
+        Path to directory containing extracted images.
+
+    Raises:
+        RuntimeError: If loading fails.
+    """
+    from datasets import load_dataset
+
+    concept_name = f"concept_{concept_id:02d}"
+    concept_dir = Path(output_dir) / concept_name
+    concept_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = [f for f in concept_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTENSIONS]
+    if len(existing) >= max_images:
+        logger.info("MS-Bench concept %d already has %d images in %s", concept_id, len(existing), concept_dir)
+        return str(concept_dir)
+
+    logger.info("Loading MS-Bench concept %d from HuggingFace...", concept_id)
+    try:
+        kwargs = {}
+        if hf_token:
+            kwargs["token"] = hf_token
+        ds = load_dataset("doge1516/MS-Bench", split="train", **kwargs)
+
+        # Filter by concept_id
+        concept_rows = [row for row in ds if row["label"] == concept_id]
+        if not concept_rows:
+            available = sorted(set(row["label"] for row in ds))
+            raise RuntimeError(
+                f"Concept ID {concept_id} not found in MS-Bench. "
+                f"Available concept IDs: {available}"
+            )
+
+        # Limit images
+        concept_rows = concept_rows[:max_images]
+        logger.info("Found %d images for MS-Bench concept %d", len(concept_rows), concept_id)
+
+        for i, row in enumerate(concept_rows):
+            img = row["image"]
+            if not isinstance(img, Image.Image):
+                img = Image.fromarray(img)
+            img = img.convert("RGB")
+            out_path = concept_dir / f"image_{i:03d}.jpg"
+            img.save(str(out_path), quality=95)
+            logger.debug("Saved: %s", out_path)
+
+        saved = list(concept_dir.glob("*.jpg"))
+        logger.info("Extracted %d images for MS-Bench concept %d to %s", len(saved), concept_id, concept_dir)
+        return str(concept_dir)
+
+    except Exception as e:
+        logger.error("Failed to load MS-Bench: %s", e)
+        raise RuntimeError(f"Could not load MS-Bench concept {concept_id}: {e}") from e
+
+
+def load_dreambench_plus_concept(
+    output_dir: str,
+    concept_id: int = 0,
+    max_images: int = 4,
+    hf_split: str = "test",
+    hf_token: Optional[str] = None,
+) -> str:
+    """Load images for a single concept from yuangpeng/dreambench_plus HuggingFace dataset.
+
+    DreamBench++ schema (if loadable) has per-concept image groups.
+    Falls back to loading all available images from the concept group.
+
+    Args:
+        output_dir: Root directory to save extracted images.
+        concept_id: Integer concept group index.
+        max_images: Maximum number of images to extract.
+        hf_split: Dataset split to use ('test' or 'train').
+        hf_token: Optional HF token.
+
+    Returns:
+        Path to directory containing extracted images.
+
+    Raises:
+        RuntimeError: If loading fails.
+    """
+    from datasets import load_dataset
+
+    concept_name = f"concept_{concept_id:02d}"
+    concept_dir = Path(output_dir) / concept_name
+    concept_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = [f for f in concept_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTENSIONS]
+    if len(existing) >= max_images:
+        logger.info("DreamBench+ concept %d already has %d images.", concept_id, len(existing))
+        return str(concept_dir)
+
+    logger.info("Loading DreamBench+ concept %d from HuggingFace (split=%s)...", concept_id, hf_split)
+    try:
+        kwargs = {}
+        if hf_token:
+            kwargs["token"] = hf_token
+        ds = load_dataset("yuangpeng/dreambench_plus", split=hf_split, **kwargs)
+
+        # Try to group by concept; dataset may have 'label', 'subject', or ordering
+        image_col = None
+        label_col = None
+        for col in ds.column_names:
+            if "image" in col.lower():
+                image_col = col
+            if "label" in col.lower() or "subject" in col.lower() or "class" in col.lower():
+                label_col = col
+
+        if label_col is not None:
+            concept_rows = [row for row in ds if row.get(label_col) == concept_id]
+        else:
+            # Fall back: assume rows are grouped by concept in fixed-size blocks
+            # or just take the first max_images rows
+            concept_rows = list(ds)[concept_id * max_images: (concept_id + 1) * max_images]
+            if not concept_rows:
+                concept_rows = list(ds)[:max_images]
+
+        concept_rows = concept_rows[:max_images]
+        logger.info("Found %d images for DreamBench+ concept %d", len(concept_rows), concept_id)
+
+        for i, row in enumerate(concept_rows):
+            img = row.get(image_col) if image_col else list(row.values())[0]
+            if not isinstance(img, Image.Image):
+                img = Image.fromarray(img)
+            img = img.convert("RGB")
+            out_path = concept_dir / f"image_{i:03d}.jpg"
+            img.save(str(out_path), quality=95)
+
+        saved = list(concept_dir.glob("*.jpg"))
+        logger.info("Extracted %d images for DreamBench+ concept %d to %s", len(saved), concept_id, concept_dir)
+        return str(concept_dir)
+
+    except Exception as e:
+        logger.error("Failed to load DreamBench+: %s", e)
+        raise RuntimeError(f"Could not load DreamBench+ concept {concept_id}: {e}") from e
+
+
 def download_dreambooth_concept(
     concept_name: str,
     output_dir: str,
